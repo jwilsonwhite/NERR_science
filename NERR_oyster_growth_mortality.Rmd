@@ -1,0 +1,364 @@
+---
+title: "NERR Oyster Growth & Mortality"
+author: "Will White"
+date: "11/01/2020"
+output: html_document
+---
+
+## Description
+
+The R code in this document analyzes the data on oyster growth and mortality collected by David Kimbro's lab group in the Guana Tolomato Matanzas National Estuarine Research Reserve (GTM NERR) in 2018 and 2019. The analyses here provide the demographic parameters necessary for analyzing spatial variation in oyster population reproductive potential and sustainability. The goal of this document is to provide a blueprint for how similar experimental data in the future could be analyzed to obtain those sustainability estimates.
+
+These data, and the resulting estimates, were collected for 7 'zones' of the GTM: 
+
+Tolomato River
+Tolomato River (harvested zone)
+Guana River
+St. Augustine
+Salt Run
+Salt Run (harvested zone)
+Butler
+Matanzas River
+Pellicer
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r warnings=FALSE, include=FALSE}
+
+# load necessary packages
+require(ggpubr)
+require(tidyverse)
+require(readxl)
+require(egg)
+require(nlme)
+```
+
+
+## Oyster mortality
+
+This analysis is based on the 2019 oyster outplant experiment. Juvenile oysters were deployed in fixed experimental units that were either completely caged or exposed to predators from May to November 2019. The goal is to estimate the survival rate of oysters exposed to natural predation, so we use the 'control' (uncaged) data for that. The 2019 deployment used naturally settling spat rather than hatchery spat (as in 2018), and there was less incidental handling mortality at the start of the deployment, hence the 2019 data should give a better estimate of natural mortality over time.
+
+The expectation is that there is a constant daily mortality rate, M. That is, the density of outplanted oysters should be declining in a negative exponential fashion. Mathematically, this is equivalent to saying that the rate of change in oyster density is dN/dt = -M * N. This means that the daily expectation for oyster density, N(t), should be 
+
+N(t) = N(0) * exp(-M*t), 
+
+where N(0) is the initial density. The estimate of M is the mortality rate that is used by the population model. Rearranging that equation and taking the logarithm of both sides, we get 
+
+log(N(t)/N(0) = -M*t
+
+So we can estimate M by plotting the logarithm of the proportion surviving over time, and fitting a line. The slope of the line will be -M.
+
+To do this in practice, we will use a generalized linear model (GLM). This will take advantage of the fact that the number of oysters still alive at each sampling data should follow a Poisson distribution. A Poisson distribution describes the integer number of things expected to be observed, given some probability of observing them. Conveniently a GLM for Poisson-distributed data takes the logarithm of those data. So we can construct a GLM that specifies that the logarithm of the number of living oysters observed on at a given time, t, should follow a Poisson distribution where the expected number is a coefficient multiplied by t. That coefficient is then the estimate of M used by the model.
+
+The analysis uses both the 'cage' and 'control' data; the 'control' data give the total mortality rate, while the 'cage' data show what mortality would be in the absence of predators.
+
+The code that follows loads in the data and then does some cleanup and processing before calculating M for each site in GMT NERR.
+
+
+```{r}
+
+# Load in data.
+data = read_xlsx("2019_outplant.xlsx",sheet="oysters")
+
+# clean up data formatting
+data$reef.id = as.factor(data$reef.id) # which zone within GTM
+data$treatment = as.factor(data$treatment) # cage, control, cagecontrol
+data$meter = as.factor(data$meter) # within-site replication (at which transect meter was the experimental unit)
+
+# define some organizational variables
+zones = levels(data$reef.id)
+
+# cleanup step to strip weird NA rows & bad values (zeros)
+NArows = data$reef.id==""
+data = data[!NArows,]
+Zrows  =data$size == 0
+data = data[!Zrows,]
+```
+
+Note that the dataset consists of a row for each observation of an oyster on a particular date.
+
+```{r}
+
+# Compile data for analysis by GLM. 
+# Poisson GLM uses integer numbers as a response variable. 
+# So, take count of number of remaining oysters on each date, at each replicate experimental unit
+data$alive <- data$status==1
+data.agg <- aggregate(data$alive,by=list(data$reef.id,data$treatment,data$timedays,data$meter),FUN=sum)
+colnames(data.agg) <- c('reef.id','treatment','timedays','meter','alive')
+
+```
+
+Ideally we would estimate adult and juvenile mortality separately, with oysters becoming 'adult' at approximately 100 d. Unfortunately there were not enough oysters surviving past 100 d in the 2019 deployment to obtain a good estimate of mortality past that point. The code below can define that switch. Due to the poor information past 100 days we restrict our analysis to that juvenile period. In the subsequent model analysis we assume that adult mortality is proportional to the juvenile estimate.
+
+```{r}
+
+#manually putting in lines to switch between calculating adult and juvenile mortality, switch as needed (or comment out all if you want the entire time series)
+juvidx <- data.agg$timedays < 100 #juvenile is defined here as 100 days or less - choose this one if you want the juvenile mortality
+#juvidx <- data.agg$timedays >= 100 #adults are older than 100 days, choose this if you want the adult mortality
+#juvidx <- rep(TRUE,length(data.agg$timedays))  # option if you want the entire timeseries
+datajuvselect <- data.agg[juvidx,] # partition the data as desired
+
+```
+
+```{r}
+# Perform the analysis for each site
+
+# pre-allocate variables for storing results
+sitelist <- vector()
+optionlist <- vector()
+M <- vector()
+Ms <- matrix(nrow=length(zones),ncol=2)
+intercept <- vector()
+Mod_mor <- list()
+Mor_cov <- vector()
+k <- 1 # this is a counter variable for use in a loop
+
+treatments <- c('cage','control','cagecontrol') # for this analysis we do not consider the cagecon treatment
+treatnames <- c('cage','con','cagecon') # short names
+
+# Loop over Zones & Treatments to estimate survival curve
+for (i in 1:length(zones)){
+  for (j in 1:2){ #length(treatments)){
+
+    data.sub <- subset(datajuvselect,reef.id == zones[i] & treatment == treatments[j])
+    m = glm(alive ~ timedays, family=poisson(link='log'),data = data.sub)
+    Mod_mor[[k]] <- m
+    Mor_cov[k] <- vcov(m)[2,2]
+    sitelist[k] <- zones[i]
+    optionlist[k] <- treatnames[j]
+    M[k] <- coef(m)[2] # for export to csv
+    Ms[i,j] <- coef(m)[2] # for use in plotting later
+    intercept[k] <- coef(m)[1]
+    k = k+1
+
+  }
+}
+
+# Store the data:
+NERRmortalitycoeffs <- data.frame(sitelist,optionlist,M,intercept,Mor_cov)
+write.csv(NERRmortalitycoeffs,'NERRmortalitycoeffs2019dec_adultLS.csv')
+```
+
+
+```{r}
+# Plot results:
+# Need to rescale data to proportion of initial density for proper plotting (analysis was on integer #oysters)
+
+Gp <- list()# variable for holding ggplot objects
+Gp2 <- list()
+Colors <- c('green','magenta','blue','purple','yellow','red','cyan')
+Zone_names = c('Butler','Guana R.','Matanzas R.','Pellicer','Salt R.','St. Augustine','Tolomato R.')
+
+for (i in 1:length(zones)){
+
+  data.sub <- subset(datajuvselect,reef.id == zones[i] & (treatment=='control' | treatment== 'cage'))
+  meters = levels(data.sub$meter)
+  for (m in 1:length(meters)){
+    # get number alive in that unit on day 0
+    con0 = data.sub$alive[data.sub$meter==meters[m] & data.sub$timedays==0 & data.sub$treatment=='control']
+    cage0 = data.sub$alive[data.sub$meter==meters[m] & data.sub$timedays==0 & data.sub$treatment=='cage']
+
+    data.sub$alive[data.sub$meter==meters[m]& data.sub$treatment=='control']=data.sub$alive[data.sub$meter==meters[m]& data.sub$treatment=='control']/con0
+    data.sub$alive[data.sub$meter==meters[m]& data.sub$treatment=='cage']=data.sub$alive[data.sub$meter==meters[m]& data.sub$treatment=='cage']/cage0
+
+    } # end loop over meters
+
+  # dummy data for plotting curves
+  timedays <- 0:max(data.sub$timedays)
+  alive.con <- exp(Ms[i,2]*timedays)
+  alive.cage <- exp(Ms[i,1]*timedays)
+  dummy.data <- data.frame(timedays,alive.con,alive.cage)
+
+  Gp[[i]] <- ggplot(data=data.sub,aes(x=timedays,y=alive))+
+             geom_jitter(aes(shape=treatment),width=2,show.legend = FALSE,color=Colors[i])+
+             scale_shape_manual(values = c(1,16))+
+             geom_line(data=dummy.data,aes(x=timedays,y=alive.con),color='blue',lty=2)+
+             geom_line(data=dummy.data,aes(x=timedays,y=alive.cage),color='blue',lty=1)+
+             xlab('Time (d)')+
+             ylab('Proportion surviving')+
+             ggtitle(Zone_names[i])
+
+  # create a separate plot with cages only
+  data.sub2 = subset(data.sub,treatment='cage')
+
+  Gp2[[i]] <- ggplot(data=data.sub2,aes(x=timedays,y=alive))+
+    geom_jitter(shape=16,width=2,color=Colors[i])+
+    geom_line(data=dummy.data,aes(x=timedays,y=alive.cage),color='blue',lty=1)+
+    xlab('Time (d)')+
+    ylab('Proportion surviving')+
+    ggtitle(Zone_names[i])
+
+} # end loop over zones
+
+# Arrange zones in desired order:
+# 7 (tolo), 2 (guana), 6 (staug), 5 (salt), 1 (butler), 3 (matanzas), 4 (pellicer)
+# Plot with both cage and control (uncaged) data:
+ggarrange(Gp[[7]],Gp[[2]],Gp[[6]],Gp[[5]],Gp[[1]],Gp[[3]],Gp[[4]], ncol = 3)
+
+# Plot with uncaged data only:
+ggarrange(Gp2[[7]],Gp2[[2]],Gp2[[6]],Gp2[[5]],Gp2[[1]],Gp2[[3]],Gp2[[4]], ncol = 3)
+```
+
+## Growth analysis
+
+The goal of the analysis of growth is to fit a von Bertalanffy growth curve to size-age data from each site. The von Bertalanffy relationship describes the growth of organisms with indeterminate growth, i.e., they keep growing their entire life, though growth slows down with age. This function is used to describe the length-age relationship for many invertebrates and fishes. It has two parameters: the asymptotic average maximum length, Linf ("L infinity"), and the growth rate, k. The units of Linf are mm, the units of k are 1/time. Note that Linf is not the maximum observed length, it is merely the average length at very old age. So it is possible to have individuals with size greater than Linf. 
+
+The von Bertalanffy curve is often estimated in a 'cross-sectional' way, by collecting a lot of individuals at one time, measuring their length and estimating their age (e.g., via sclerochronology), then plotting length vs. age and fitting a curve. In this case we had a 'longitudinal' study, in which we followed the growth of the same oysters over multiple months, then plotted length vs. age. The advantage of this is a much finer-scale estimate of growth (it would be difficult to estimate oyster age down to months from shell sclerochronology alone) but this does artificially reduce the apparent variability in the data because we are repeatedly sampling the same individuals over time. 
+
+This analysis uses the 2018 outplant study. This had a similar experimental design to the 2019 study but was followed longer, so that we had estimates of growth over more than an entire year. Note that the setup of the data spreadsheet is similar to that in the 2019 data. For the Pellicer site, all of the oysters died early in the experiment so fitting a growth curve proved impossible.
+
+
+```{r message=FALSE, warning=FALSE}
+#---------------------------------------------------------
+# Load in data.
+data = read_xlsx("2018_outplant.xlsx",sheet="cluster")
+
+# clean up data formatting
+data$site = as.factor(data$site) # specific study sites within each zone
+data$zone = as.factor(data$zone) # zones within GTM
+data$cl.no = as.factor(data$cl.no) # within-site replication (each oyster cluster)
+data$time.days = data$`time(days)`
+
+# define some organizational variables
+zones = levels(data$zone)
+```
+
+Fitting the von Bertalanffy curve is done with nonlinear least squares. This is similar to fitting a linear regression but allows for nonlinear curves (as the name implies). However fitting a nonlinear function requires providing the algorithm with 'starting values',an initial guess at what the values of k and Linf are. Better initial guesses lead to faster convergence on the correct result.
+
+```{r warning=FALSE}
+
+# Fit nonlinear von Bertalanffy growth curves
+# allocate vectors for results
+Linf <- rep(NA,length(zones))
+k <- Linf; t0 <- Linf
+Mod_growth <- list()
+Growth_cov <- list()
+
+# Need to provide initial guesses for the model parameters; these can vary by site.  In this case we had to use a different initial value for the 4th site...which turned out not to have enough data to fit a curve anyway
+Linf.starts = rep(80,length(zones))
+Linf.starts[4]=10 # try different starting values for different sites
+
+# Dummy variables for curve-plotting purposes
+age.dummy = 0:max(data$time.days)
+L.dummy = matrix(0,nrow=length(age.dummy),ncol=length(zones))
+
+# Loop over zones to get fits:
+for (z in 1:length(zones)){
+  if (z != 4){# pellicer zone doesn't have enough data to fit
+
+    data.sub = subset(data,zone==zones[z])
+    data.sub = data.sub[!is.na(data.sub$size),] # trim out NAs
+
+    # option 1: nonlinear least squares.
+    # The vB equation is L(t) = Linf * (1 - exp(-k*(t - t0)))
+    m = nls(formula = data.sub$size ~ Linf*(1 - exp(-k*(data.sub$time.days-t0))),
+            start = list(Linf=Linf.starts[z],k=0.1,t0=0),data=data.sub,control=nls.control(minFactor=1/(2^15),maxiter = 200))
+
+    # option 2: nonlinear mixed effects. This would account for the repeated measurements on the same oysters. However, this approach had issues with convergence at some sites (and saw little
+    # difference in fit in sites that did converge), so did not use this method. Code left here for future use if desired.
+    
+    #f1 <- data.sub$size ~ Linf*(1-exp(-(k*(data.sub$time.days. - t0))))
+    #m1 = nlme(f1,data=as.data.frame(data.sub),start=coef(m),fixed=k+Linf+t0~1,random=cl.no~1,na.action=na.omit)#,group=~reefid,na.action=na.omit)
+
+    Mod_growth[[z]] <- m
+    Growth_cov[[z]] <- vcov(m)[1:2,1:2]
+    Linf[z] = coef(m)[1]
+    k[z] = coef(m)[2]
+    t0[z] = coef(m)[3]}
+
+  # Results for plotting:
+  L.dummy[,z] = Linf[z]*(1-exp(-(k[z]*(age.dummy-t0[z]))))  }
+
+# Plot data &  growth curves:
+Gp <- list()
+Colors <- c('green','magenta','blue','purple','black','yellow','red','black','cyan')
+Zone_names = c('Butler','Guana R.','Matanzas R.','Pellicer','Salt R. harvest','Salt R.','St. Augustine','Tolomato R. harvest','Tolomato R.')
+for (z in 1:length(zones)){
+
+  # subset data
+  data.sub = subset(data,zone==zones[z])
+  data.dummy = data.frame(x = age.dummy,y=L.dummy[,z])
+
+  Gp[[z]]<-ggplot(data.sub,aes(x=time.days,y=size))+
+    geom_jitter(color=Colors[z])+
+    geom_line(data=data.dummy,aes(x=x,y=y),color='blue')+
+    ylim(c(0,80))+
+    xlab('Days')+
+    ylab('Length (mm)')+
+    ggtitle(Zone_names[z])
+  theme_bw()}
+
+# How to order sites:
+# 9 (tolo.non), 8 (tolo.harvest),2 (guana), 7 (staug), 6 (salt.non), 5 (salt.harvest), 1 (butler), 3 (matanzas), 4 (pellicer)
+#Order = c(9,8,2,7,6,5,1,3,4)
+ggarrange(Gp[[9]],Gp[[8]],Gp[[2]],Gp[[7]],Gp[[6]],Gp[[5]],Gp[[1]],Gp[[3]],Gp[[4]], ncol = 3)
+
+#---------------------------------------------------------------------------
+```
+
+
+## Creating output files for use by the model
+
+The NERRprojectpackage library requires two data files, one with the mortality and growth parameters and one with the covariances of those parameters. This code assembles those files.
+
+```{r}
+#---------------------------------------------------------------------------
+# 3) Create output Params & CovMats files for the model. Note that the growth dataset had separate entries for the harvested portions of Tolomato and Salt Run, so we exclude those
+Which.zones <- c(1:4,6:7,9) # the indices of the desired zones
+Zone_names.short <- Zone_names[Which.zones]
+Linf.short <- Linf[Which.zones]
+k.short <- k[Which.zones]
+
+# Pellicer had missing growth data, so use the site means
+Linf.short[Zone_names.short=='Pellicer'] = mean(Linf.short,na.rm=TRUE)
+k.short[Zone_names.short=='Pellicer'] = mean(k.short,na.rm=TRUE)
+
+Params <- data.frame(sites=Zone_names.short, Mjuv= Ms[,2], M = Ms[,2]*0.1, Linf = Linf.short, k=  k.short) # maximum likelihood estimates for each parameter
+
+
+
+#Mor_cov included both cage and control analyses, so we have to exclude the former. 
+Mor_cov.control <- Mor_cov[seq(2,14,2)] # take every other entry
+
+# Growth_cov has to have the harvest sites removed
+Growth_cov.short <- Growth_cov[Which.zones]
+
+# Quick loop to take site averages for substituting in for missing Pellicer values
+Growth_cov.short[[which(Zone_names.short=='Pellicer')]] <- matrix(nrow=2,ncol=2)
+for (j in 1:2){
+  for (k in 1:2){
+  tmp <- rep(NA,length(Which.zones))
+  for (i in 1:length(Which.zones)){
+    if (Zone_names.short[i]!='Pellicer'){
+      tmp[i]<-Growth_cov.short[[i]][j,k]}
+  } 
+  Growth_cov.short[[which(Zone_names.short=='Pellicer')]][j,k]<- mean(tmp,na.rm=TRUE)
+  }}
+
+# CovMats will have to be a list of matrices
+CovMats = list()
+for (i in 1:length(Which.zones)){
+  Ctmp <- matrix(0,nrow=3,ncol=3)
+  Ctmp[1,1] = Mor_cov.control[i] # variance in mortality rate
+  Ctmp[2:3,2:3] = Growth_cov.short[[i]]
+  CovMats[[i]] = Ctmp
+}
+
+save(Params,file='Params.Rdata')
+save(CovMats,file='CovMats.Rdata')
+#---------------------------------------------------------------------------
+```
+
+

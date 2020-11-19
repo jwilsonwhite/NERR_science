@@ -1,0 +1,72 @@
+---
+title: "ReadMe"
+author: "Will White"
+date: "11/13/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## What do these files do?
+
+This Readme is associated with files created for the Oyster Population Sustainability project at the Guana Tolomato Matanzas National Estuarine Research Reserve (GTM NERR), led by PI Will White, co-PI David Kimbro, and postdoctoral scholar Laura Storch.
+
+There are two main components: the R package `NERRprojectpackage` implements a population model analysis of data from oyster populations at 7 sites in GTM to assess the relative contribution to population sustainability of oysters at each site. This information is intended to be useful in planning restoration and management decisions.
+
+The data required by `NERRprojectpackage` are oyster mortality rates and growth rates at each site. The Rmarkdown document `NERR_oyster_growth_mortality.Rmd` (also displayed in a more human-friendly version as `NERR_oyster_growth_mortality.html`) is a guide for how to analyze data to obtain those model parameters. The intent is for this to be adaptable for future data collected at GTM, or in any location.
+
+The data files used by `NERR_oyster_growth_mortality.Rmd` are `2018_outplant.xlsx` and `2019_outplant.xlsx`. Each of these data files has a Readme tab providing metadata. To use code like that in NERR_oyster_growth_mortality.Rmd, data files should be formatted in a similar manner.
+
+## Where to get the files
+
+The most up-to-date version of the package and other files can be downloaded from GitHub at https://github.com/jwilsonwhite/NERR_science. 
+
+## NERRprojectpackage
+
+After downloading the `NERRprojectpackage` folder from the git repository, place the folder in the desired location. Or, below is code to load it directly from Github. 
+
+If you do not have the `devtools` package, you will need to install that first:
+
+```{r message = FALSE}
+require("devtools")
+library('devtools')
+```
+
+After installing devtools, from the parent working directory containing the `NERRprojectpackage` folder, in your R console type:
+
+```{r eval=FALSE}
+install("NERRprojectpackage",build_vignettes=TRUE)
+# The 'build_vignettes' command ensures that the how-to vignette is also loaded
+```
+
+Alternatively, you can install the package directly from the git repository (this also requires the `devtools` package): 
+
+```{r eval=FALSE}
+install_github('NERRprojectpackage','jwilsonwhite/NERR_science/NERRprojectpackage',build_vignettes=TRUE)
+```
+
+Note that both of these steps are different from the `install.packages()` command used to install standard R packages found on CRAN. 
+
+After installing the package, load it into your workspace as usual:
+
+```{r}
+library(NERRprojectpackage)
+```
+
+To get started, read the 'GTM' vignette that comes with the package
+
+```{r message=FALSE}
+vignette('GTM')
+```
+
+
+## NERR_oyster_growth_mortality
+
+The R code in `NERR_oyster_growth_mortality.Rmd` is separate from the `NERRprojectpackage` package, and operates as standalone code. It was created using Rmarkdown. Rmarkdown allows the blending of text and code and the production of user-friendly documents (like this one). The `rmarkdown` package is not necessary to use the code, but is necessary to 'knit' updates of the code into new documents.
+
+The code in the file works as standard R code and lists the required additional packages. The only additional requirement is that it be run in the same working directory as the two .xlsx data files.
+
+
+
