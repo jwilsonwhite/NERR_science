@@ -11,7 +11,7 @@ kernmatsimple(x, F, fixparm, T)
 
 \item{F}{This is the fishing rate, set to 0 in EPR_NERR_simple}
 
-\item{fixparm}{This is Params that has Params$M, Params$Linf, Params$k (only one value for each) but there are other components added in EPR_NERR_simple before Params goes into this function}
+\item{fixparm}{This is Params that has Params$Linf, Params$k (only one value for each) but there are other components added in EPR_NERR_simple before Params goes into this function}
 
 \item{T}{This is the "step size", set to 1 in EPR_NERR_simple}
 }

@@ -1,0 +1,119 @@
+---
+title: "Using NERRprojectpackage"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Using NERRprojectpackage}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+## What does the model do? 
+
+This package contains several functions that implement a size structured model of oyster populations in the Guana Tolomato Matanzas National Estuarine Research Reserve (GTM NERR), based on field estimates of oyster growth and mortality rates.  
+
+The goal of the model analysis is to produce estimates of the 'sustainability' of oyster populations at one or more sites. Sustainability, i.e., whether a population is sustaining itself over time (and possibly contributing spat to neighboring sites) depends on two processes: the lifetime reproductive output of each oyster (how many eggs are produced over the lifetime of one oyster), and the probability that larvae spawned at a site will return to that site after the pelagic larval period. Processes affecting larval transport in estuaries are complex and essentially unknown for the GTM. Therefore we focus analysis on the benthic processes affecting lifetime reproductive output: mortality and growth. This makes the usual assumption that reproductive output is proportional to biomass.
+
+There are two outputs of the model. The first is the expected size distribution of oysters at each site, assuming they each received a steady stream of larval spat settlement. Essentially, populations that are more sustainable will have longer, fatter size distributions, reflecting higher survival and faster growth, so there are more large oysters. 
+
+The second model output is an estimate of the relative biomass-per-recruit at each site. 'Biomass-per-recruit' essentially means how much biomass one new recruit will contribute to a population over its lifetime. A similar quantity that is often used in fisheries is 'yield per recruit', which is how much yield (in lbs or kg) you get from one new recruit. This is used to guide management - for example, one might choose to reduce the harvest rate to allow animals to survive to older, larger sizes before harvest. The same idea operates for biomass per recruit: oysters that live longer and grow to larger sizes will have a higher biomass per recruit, and thus a higher overall contribution to reproduction and sustainability. The units for this quantity are not especially meaningful, so they are simply rescaled relative to one another, so that the population with the greatest biomass per recruit has a value of 1. 
+
+If recruitment were constant, the total biomass in the population would be the biomass per recruit multiplied by the number of recruits per unit time. It is also equal to the stable size distribution (output #1) multiplied by the ash free dry weight at each length, and summed over all lengths.  
+
+## Installing the package
+
+The most up-to-date version of the package can be downloaded from GitHub at https://github.com/jwilsonwhite/NERR_science. After downloading the NERRprojectpackage folder from the git repository, place the folder in the desired location. Or, below is code to load it directly from Github. 
+
+If you do not have the devtools package, you will need to install that first:
+
+```{r message = FALSE}
+require("devtools")
+library('devtools')
+```
+
+After installing devtools, from the parent working directory containing the NERRprojectpackage folder, in your R console type:
+
+```{r eval=FALSE}
+install("NERRprojectpackage")
+```
+
+Alternatively, you can install the package directly from the git repository (this also requires the devtools package): 
+
+```{r eval=FALSE}
+install_github('NERRprojectpackage','jwilsonwhite/NERR_science/NERRprojectpackage')
+```
+
+
+##Using NERRprojectpackage
+
+After the package is installed, run the library command to load all of the functions and data files into the current R session: 
+
+```{r echo=FALSE}
+library('NERRprojectpackage')
+```
+
+
+## Input data requirements
+
+The input data required for this model includes an estimate of the growth rate, maximum adult size, adult mortality rate, juvenile mortality rate, and site name for a given region.  These estimates are included for seven regions of the GTMNERR in the data file Params.Rdata.  The estimates were taken from experiments performed by the Kimbro lab from 2018 to present (2020).  Currently, the adult mortality rates are set as 10% of the juvenile mortality rates because of a lack of data on older age classes.  The user may choose to use their own data instead of the provided data, as long as it is in the same format as Params.Rdata, with one entry per study site.
+
+The other included data file is CovMats.RData, which contains covariance matrices for the three estimated parameters (growth rate, maximum size, and juvenile mortality rate).  These are necessary for calculating the uncertainty in biomass per recruit, given the uncertainty in the estimates of each parameter.
+
+The steps for analyzing data and creating those datafiles are found in the accompanying R Markdown documents NERR_oyster_growth_mortality.Rmd and  NERR_oyster_growth_mortality.html.
+
+ 
+To view the included data and load them into the workspace environment, after installing NERRprojectpackage (see instructions below), type the following lines into the R console:  
+
+```{r}
+library(NERRprojectpackage)
+data(Params)
+data(CovMats)
+```
+
+## Contents of the package
+
+There are several function files included in the package, but most are "internal" functions (i.e., the user does not directly call these functions).  The end-user function is run_biomass_NERR_simple.  If you begin to type "run_biomass_NERR_simple" in the console, R should suggest an autocomplete and suggest pressing F1 for additional details.  Pressing F1 leads to the run_biomass_NERR_simple help file, which lists necessary inputs and describes the purpose of the function.  You can also access the help file by typing ?run_biomass_NERR_simple.  
+
+The inputs for run_biomass_NERR_simple are Params, CovMats, and n, which dictates the number of trials to run with perturbations to the input parameters, based on the information in CovMats.  A suggested value for n is 1000, to obtain consistent results (though this will take a few minutes to execute).  Running the model over a range of parameter perturbations (based on the variances in CovMats) allows us to estimate the uncertainty in the outputs.  
+
+## Running the model
+
+To run, type the following into the R console:
+
+```{r warning=FALSE}
+x <- run_biomass_NERR_simple(Params,CovMats,n=10)
+```
+
+The function returns a list of several outputs.
+
+The first, `SizesGG` is a list of ggplot2 objects that plots the stable size distributions for the seven regions, which 95% uncertainty bounds.
+
+The second, `BiomassGG`, is the biomass-per-recruit estimates for the seven regions, with 95% uncertainty bars. 
+
+The other outputs, `SSD` and `Biomass` contain the data for the size distributions and biomass-per-recruit, respectively.
+
+```{r,  fig.width = 4,fig.height=6,warning=FALSE,message=FALSE}
+# plot size distributions
+
+# This is most easily plotted as a multipanel figure
+require('egg')
+require('ggplot2')
+ggarrange(x$SizesGG[[1]],x$SizesGG[[2]],x$SizesGG[[3]],x$SizesGG[[4]],x$SizesGG[[5]],x$SizesGG[[6]],x$SizesGG[[7]], ncol =3)
+
+```
+
+
+```{r}
+# plot biomass per recruit
+require('ggplot2')
+x$BiomassGG
+```
+
+
+
+

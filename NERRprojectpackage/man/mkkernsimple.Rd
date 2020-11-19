@@ -18,7 +18,7 @@ mkkernsimple(x, y, F, fixparm, T)
 \item{T}{This is the "step size", set to 1 in EPR_NERR_simple}
 }
 \description{
-This is an internal function that creates the growth kernel that gets used in EPR_NERR_simple.  Not meant to be run on its own.
+This is an internal function that creates the growth/mortality kernel that gets used in EPR_NERR_simple.  Not meant to be run on its own.
 }
 \examples{
 mkkernsimple(x,y,F,fixparm,T)

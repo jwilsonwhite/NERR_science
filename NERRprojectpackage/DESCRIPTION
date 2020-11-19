@@ -1,9 +1,13 @@
 Package: NERRprojectpackage
-Title: NERR integral projection model
+Title: NERR integral projection model v2
 Version: 0.0.0.9000
 Authors: Laura Storch <laura.storch@oregonstate.edu>, Will White <will.white@oregonstate.edu>
 Description: Population model analysis for Guana Tolomato Matanzas NERR Science Collaborative 
 License: GPL-3
 Encoding: UTF-8
 LazyData: true
-RoxygenNote: 7.0.2
+RoxygenNote: 7.1.1
+Suggests: 
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
